@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10131c"><title>Photo Age AI</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:24px 15px;background:#10131c;color:#f7f7fb;font-family:Arial,sans-serif;display:grid;place-items:center}
+main{width:min(100%,520px)}h1{text-align:center;font-size:38px}.sub{text-align:center;color:#b5bfd0;line-height:1.5}
+.card{background:#1b2230;border:1px solid #374154;border-radius:20px;padding:20px}.pick,button{display:inline-block;border:0;border-radius:12px;padding:13px 18px;background:#8979ed;color:white;font-weight:bold;cursor:pointer}
+.drop{text-align:center;border:1px dashed #8276c9;background:#24243a;border-radius:15px;padding:24px}.drop p,.note{color:#b5bfd0;font-size:13px;line-height:1.5}
+input[type=file]{display:none}.consent{display:flex;gap:10px;font-size:13px;line-height:1.5;margin:17px 0}.consent input{margin-top:3px}
+button{width:100%}button:disabled{opacity:.45}.files{display:grid;gap:8px;margin-top:12px}.file{background:#111722;border-radius:9px;padding:10px;font-size:13px;display:flex;justify-content:space-between;gap:8px}.status{text-align:center;min-height:22px;color:#75e0bf;font-size:13px;margin-top:12px}.error{color:#ff9b9b}
+</style></head><body><main>
+<h1>📸 Photo Age AI</h1><p class="sub">Choose photos you want to share. Nothing is uploaded until you select files, agree and tap Upload.</p>
+<section class="card">
+<div class="drop"><div style="font-size:38px">🖼️</div><h3>Choose photos from your device</h3><p>Your browser will open its photo picker. This site cannot browse your gallery automatically.</p><label class="pick" for="photos">Open Gallery</label><input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></div>
+<div id="files" class="files"></div>
+<label class="consent"><input id="consent" type="checkbox"><span>I agree that the photos I select will be securely uploaded and shared with the website owner at <b>mkkalai95@gmail.com</b> for an approximate apparent-age estimate. I confirm I have permission to share these photos.</span></label>
+<p class="note">Age results are rough visual guesses, not verified ages. Do not use them for identity checks or important decisions. Uploads use private storage and email links expire after 7 days.</p>
+<button id="upload" disabled>Upload photos & estimate age</button><div id="status" class="status" role="status"></div><div id="results" class="files"></div>
+</section></main>
+<script>
+const picker=document.querySelector('#photos'),consent=document.querySelector('#consent'),btn=document.querySelector('#upload'),filesEl=document.querySelector('#files'),statusEl=document.querySelector('#status'),results=document.querySelector('#results');let selected=[];
+function refresh(){selected=[...picker.files];filesEl.innerHTML='';selected.forEach(f=>{let d=document.createElement('div');d.className='file';let n=document.createElement('span');n.textContent=f.name;let s=document.createElement('span');s.textContent=(f.size/1048576).toFixed(1)+' MB';d.append(n,s);filesEl.append(d)});btn.disabled=!(selected.length&&consent.checked)}
+picker.onchange=()=>{statusEl.textContent='';refresh()};consent.onchange=refresh;
+btn.onclick=async()=>{if(!selected.length||!consent.checked)return;if(selected.length>8||selected.some(f=>!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size>8*1048576)){statusEl.textContent='Choose up to 8 JPG, PNG or WebP images, each no larger than 8 MB.';statusEl.className='status error';return}
+btn.disabled=true;picker.disabled=true;results.innerHTML='';let uploaded=[];
+try{
+ for(let i=0;i<selected.length;i++){let f=selected[i];statusEl.textContent=`Uploading ${i+1}/${selected.length}…`;
+ let a=await fetch('/.netlify/functions/create-upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:f.name,contentType:f.type,size:f.size})});let d=await a.json();if(!a.ok)throw Error(d.error||'Could not prepare upload');
+ let p=await fetch(d.signedUrl,{method:'PUT',headers:{'Content-Type':f.type,'x-upsert':'false'},body:f});if(!p.ok)throw Error('Photo upload failed');uploaded.push({path:d.path,name:f.name})}
+ let analyses=[];
+ for(let i=0;i<uploaded.length;i++){statusEl.textContent=`Estimating apparent age ${i+1}/${uploaded.length}…`;let r=await fetch('/.netlify/functions/analyze-age',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:uploaded[i].path})});let a=await r.json();if(!r.ok)a={status:'unavailable',message:a.error};analyses.push({...a,name:uploaded[i].name});let row=document.createElement('div');row.className='file';let n=document.createElement('span');n.textContent=uploaded[i].name;let v=document.createElement('b');v.textContent=a.status==='estimated'?`About ${a.estimated_age} years (${a.range||'approximate'})`:'Estimate unavailable';row.append(n,v);results.append(row)}
+ statusEl.textContent='Upload complete. Age estimates are shown above.';
+ let mail=await fetch('/.netlify/functions/notify-owner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uploads:uploaded,analyses,consent:true})});if(!mail.ok)statusEl.textContent='Photos uploaded, but owner email notification failed. Please contact the site owner.';
+ picker.value='';consent.checked=false;selected=[];refresh();
+}catch(e){statusEl.textContent=e.message||'Upload failed';statusEl.className='status error'}finally{picker.disabled=false;refresh()}
+};
+</script></body></html>
